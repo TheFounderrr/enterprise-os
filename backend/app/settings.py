@@ -4,7 +4,7 @@ import os
 from pathlib import Path
 
 from dotenv import dotenv_values
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.exc import ArgumentError
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -19,6 +19,13 @@ def database_url(root=ROOT):
     dev_file = root / ".local" / "dev.env"
     if shell is not None:
         value = shell
+    elif host := os.environ.get("POSTGRES_HOST"):
+        user, password, name = (
+            os.environ.get(key) for key in ("POSTGRES_USER", "POSTGRES_PASSWORD", "POSTGRES_DB")
+        )
+        if not all((user, password, name)):
+            raise ConfigurationError("POSTGRES_HOST requires POSTGRES_USER, POSTGRES_PASSWORD and POSTGRES_DB.")
+        return URL.create("postgresql+psycopg", username=user, password=password, host=host, database=name)
     elif dev_file.is_file():
         value = dotenv_values(dev_file).get("DATABASE_URL")
     else:

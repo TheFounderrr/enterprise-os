@@ -14,7 +14,7 @@ $backend = Join-Path $root 'backend'
 $python = Join-Path $root '.venv\Scripts\python.exe'
 $frontendUrl = 'http://localhost:3000'
 $webHealthBase = 'http://127.0.0.1:3000'
-$apiHealth = 'http://127.0.0.1:8000/api/health'
+$apiHealth = 'http://127.0.0.1:8000/api/health/ready'
 
 function ProcessRecord($process) {
     @{ id = $process.Id; started = [string]$process.StartTime.ToUniversalTime().Ticks }

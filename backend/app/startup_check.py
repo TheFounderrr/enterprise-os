@@ -1,11 +1,7 @@
 """Read-only database preflight for the Windows launcher."""
 
 import sys
-from pathlib import Path
-
-from alembic.config import Config
 from alembic.migration import MigrationContext
-from alembic.script import ScriptDirectory
 from sqlalchemy.exc import SQLAlchemyError
 
 from .settings import ConfigurationError, database_url
@@ -22,12 +18,11 @@ def main():
             )
         if "--config" not in sys.argv:
             from .config import engine
+            from .health import schema_heads
 
-            scripts = ScriptDirectory.from_config(Config(str(Path(__file__).resolve().parents[1] / "alembic.ini")))
             with engine.connect() as connection:
                 current = set(MigrationContext.configure(connection).get_current_heads())
-                expected = set(scripts.get_heads())
-                if current != expected:
+                if current != schema_heads():
                     raise ConfigurationError("Database schema is not current. Review and run scripts/migrate.ps1.")
     except ConfigurationError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)

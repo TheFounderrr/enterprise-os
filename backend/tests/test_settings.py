@@ -3,6 +3,19 @@ import pytest
 from app.settings import ConfigurationError, database_url
 
 
+def test_compose_database_fields(tmp_path, monkeypatch):
+    monkeypatch.delenv("DATABASE_URL", raising=False)
+    monkeypatch.setenv("POSTGRES_HOST", "db")
+    monkeypatch.setenv("POSTGRES_DB", "enterprise")
+    monkeypatch.setenv("POSTGRES_USER", "enterprise")
+    monkeypatch.setenv("POSTGRES_PASSWORD", "synthetic:@/%")
+    url = database_url(tmp_path)
+    assert url.host == "db"
+    assert url.password == "synthetic:@/%"
+    monkeypatch.setenv("DATABASE_URL", "sqlite://")
+    assert database_url(tmp_path).get_backend_name() == "sqlite"
+
+
 def test_database_url_precedence(tmp_path, monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
     (tmp_path / ".env").write_text("DATABASE_URL=sqlite:///root.db", encoding="utf-8")
