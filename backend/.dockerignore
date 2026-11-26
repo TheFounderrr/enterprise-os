@@ -1,0 +1,10 @@
+**
+!app/
+!app/*.py
+!alembic/
+!alembic/env.py
+!alembic/script.py.mako
+!alembic/versions/
+!alembic/versions/*.py
+!alembic.ini
+!requirements.txt

@@ -1,6 +1,7 @@
 import os
 import secrets
 from datetime import timedelta
+from unittest.mock import Mock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -8,12 +9,14 @@ from fastapi.testclient import TestClient
 os.environ["DATABASE_URL"] = "sqlite://"
 os.environ["COOKIE_SECURE"] = "false"
 
+from app import health
 from app.auth import digest, hasher, issue
 from app.config import database
 from app.main import app
 from app.models import Base, Company, Department, Project, Session, User
 from app.services import today
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, select
+from sqlalchemy.exc import OperationalError
 from sqlalchemy.orm import sessionmaker
 
 password = secrets.token_urlsafe(24)
@@ -21,11 +24,19 @@ password = secrets.token_urlsafe(24)
 
 @pytest.fixture(scope="module")
 def workspace(tmp_path_factory):
-    path = tmp_path_factory.mktemp("db") / "test.db"
-    engine = create_engine(f"sqlite:///{path}")
-    Base.metadata.create_all(engine)
+    postgres_url = os.environ.get("ENTERPRISE_TEST_DATABASE_URL")
+    if postgres_url:
+        engine = create_engine(postgres_url)
+        if engine.dialect.name != "postgresql" or engine.url.database != "enterprise_test":
+            pytest.fail("Integration tests require a disposable PostgreSQL database named enterprise_test.")
+    else:
+        path = tmp_path_factory.mktemp("db") / "test.db"
+        engine = create_engine(f"sqlite:///{path}")
+        Base.metadata.create_all(engine)
     sessions = sessionmaker(engine, expire_on_commit=False)
     with sessions.begin() as db:
+        if postgres_url and db.scalar(select(Company.id).limit(1)) is not None:
+            pytest.fail("Use a fresh migrated enterprise_test database for each integration test run.")
         a, b = Company(name="A"), Company(name="B")
         db.add_all([a, b])
         db.flush()
@@ -65,6 +76,30 @@ def client(role=None):
         response = session.post("/api/auth/login", json={"email": f"{role}@demo.example", "password": password})
         assert response.status_code == 200, response.text
     return session
+
+
+def test_health(workspace, monkeypatch):
+    _, sessions = workspace
+    engine = sessions.kw["bind"]
+    monkeypatch.setattr(health, "engine", engine)
+    anonymous = client()
+    assert anonymous.get("/api/health").json() == {"ok": True}
+    assert anonymous.get("/api/health/live").json() == {"ok": True}
+    response = anonymous.get("/api/health/ready")
+    if engine.dialect.name == "postgresql":
+        assert response.status_code == 200
+        assert response.json() == {"ok": True}
+        monkeypatch.setattr(health, "schema_heads", lambda: {"different_revision"})
+        response = anonymous.get("/api/health/ready")
+    assert response.status_code == 503
+    assert response.json() == {"ok": False}
+    offline = Mock()
+    offline.connect.side_effect = OperationalError(None, None, RuntimeError("Database offline"))
+    monkeypatch.setattr(health, "engine", offline)
+    assert anonymous.get("/api/health/live").status_code == 200
+    response = anonymous.get("/api/health/ready")
+    assert response.status_code == 503
+    assert response.json() == {"ok": False}
 
 
 def test_auth_and_origin(workspace):

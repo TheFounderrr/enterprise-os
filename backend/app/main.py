@@ -7,13 +7,13 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from . import auth, schemas as s
+from . import auth, health, schemas as s
 from .config import database, origin
 from .models import Company, Department, Document, Event, Notification, Project, Request, Shift, Task, User
 from .policy import DIRECTOR, EMPLOYEE, HR, MANAGER, audit, notify, people, read, require, scoped, visible
 from .services import absence, dashboard, employee, history, media_type, project_info, projects_with_stats, record, remaining, span_days, staff_status, task, today
 
-app = FastAPI(title="Enterprise OS Professional Edition", version="0.2.0")
+app = FastAPI(title="Enterprise OS Professional Edition", version="0.3.0")
 api = APIRouter()
 DB = Annotated[Session, Depends(database)]
 Actor = Annotated[User, Depends(auth.current)]
@@ -398,11 +398,7 @@ def mark_read(key: int, db: DB, user: Actor):
     return {"ok": True}
 
 
-@api.get("/health")
-def health():
-    return {"ok": True}
-
-
+api.include_router(health.router)
 api.include_router(auth.router)
 app.include_router(api, prefix="/api")
 

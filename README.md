@@ -80,9 +80,36 @@ flowchart LR
 | `scripts/` | Команды запуска, миграций и создания демоданных. |
 | `docs/` | Описание архитектуры и скриншоты. |
 
+## Локальный запуск всего приложения через Docker Compose
+
+Нужен Docker с Compose v2. При первом запуске скопируйте `.env.example` в `.env`. Если `.env` уже существует, дополните его по шаблону. Задайте свой `POSTGRES_PASSWORD`. Compose передаёт параметры PostgreSQL контейнерам отдельно и не использует `DATABASE_URL` с хоста.
+
+```powershell
+docker compose up --build --wait
+docker compose ps --all
+curl.exe --noproxy "*" --fail http://127.0.0.1:3000/api/health/live
+curl.exe --noproxy "*" --fail http://127.0.0.1:3000/api/health/ready
+```
+
+Откройте [localhost:3000](http://localhost:3000). Сервис `migrate` ждёт готовности БД, выполняет `alembic upgrade head` и завершается. API стартует после его успешного завершения. Для отдельного запуска миграций используйте `docker compose run --rm --build migrate`. `/api/health/live` проверяет ответ процесса, `/api/health/ready` требует подключения к БД и совпадения ревизий Alembic. При недоступной или устаревшей схеме readiness возвращает HTTP 503.
+
+Для демо и проверки контейнеров создайте `.env.v03-check` из `.env.example`. Задайте отдельный пароль PostgreSQL, имя базы `enterprise_v03_check` и свободные порты, например `POSTGRES_PORT=55433` и `WEB_PORT=3300`. Для этого примера укажите `APP_ORIGIN=http://localhost:3300`. Имя Compose-проекта `enterprise-v03-check` создаёт отдельный том. Для новой демобазы выполните:
+
+```powershell
+docker compose --env-file .env.v03-check -p enterprise-v03-check up --build --wait
+if ($LASTEXITCODE -ne 0) { throw 'Демо-окружение не готово' }
+$env:DEMO_PASSWORD = [System.Net.NetworkCredential]::new('', (Read-Host 'Пароль демо-аккаунтов' -AsSecureString)).Password
+try { docker compose --env-file .env.v03-check -p enterprise-v03-check run --rm --no-deps -e DEMO_PASSWORD backend python -m app.seed }
+finally { Remove-Item Env:DEMO_PASSWORD }
+```
+
+Для остановки демо используйте `docker compose --env-file .env.v03-check -p enterprise-v03-check down`. Файл с локальными секретами игнорируется Git.
+
+Frontend и порт БД опубликованы только на loopback. При изменении `WEB_PORT` выставьте соответствующий `APP_ORIGIN`. Старая локальная база Compose использует тот же том `enterprise-db`. При повторном запуске сохраняйте прежнее имя базы, пользователя и пароль. Для обычной остановки используйте `docker compose down`, он сохраняет именованный том.
+
 ## Локальный запуск на Windows
 
-Понадобятся Python 3.12, Node.js 22 или новее, npm и PostgreSQL. Вариант ниже использует Docker Compose для базы. С уже установленным PostgreSQL создайте отдельную базу для разработки и пропустите команду Docker.
+Установите Python и Node.js по версиям из `.python-version` и `.nvmrc` соответственно. Вариант ниже использует Docker Compose для базы. С уже установленным PostgreSQL создайте отдельную базу для разработки и пропустите команду Docker. Перед запуском Windows-лаунчера освободите порты `3000` и `8000`. Если одновременно нужен Compose-frontend, задайте ему другой `WEB_PORT` и соответствующий `APP_ORIGIN`.
 
 ### Первый запуск из чистой копии
 
@@ -92,7 +119,7 @@ flowchart LR
    Copy-Item .env.example .env
    ```
 
-   Заполните `POSTGRES_PASSWORD` и `DATABASE_URL` в `.env`. Для Docker Compose пароль в URL должен соответствовать `POSTGRES_PASSWORD`. Закодируйте специальные символы пароля для URL.
+   Для Python, запущенного на хосте, задайте `DATABASE_URL` в `.env`. Если через Compose запущена только БД, заполните также `POSTGRES_PASSWORD`, используйте в URL тот же пароль и порт `POSTGRES_PORT`. Закодируйте специальные символы пароля для URL. При полном запуске через Compose переменная `DATABASE_URL` из файла не используется.
 
    ```dotenv
    DATABASE_URL=postgresql+psycopg://enterprise:<URL-encoded-password>@127.0.0.1:5432/enterprise
@@ -103,7 +130,7 @@ flowchart LR
    ```powershell
    docker compose up -d db
    python -m venv .venv
-   .\.venv\Scripts\python.exe -m pip install -r backend/requirements.txt
+   .\.venv\Scripts\python.exe -m pip install -r backend/requirements-test.txt
    npm.cmd --prefix frontend ci
    ```
 
@@ -153,6 +180,8 @@ flowchart LR
 - Настройки VS Code скрывают локальные артефакты из Explorer. Зависимость от расширений отсутствует.
 
 ## Тестирование
+
+Обычный запуск pytest использует SQLite. Для PostgreSQL создайте отдельную пустую базу с именем `enterprise_test`. Из `backend/` примените к ней `python -m alembic upgrade head` с её адресом в `DATABASE_URL`, запустите `python -m alembic check`, затем передайте тот же адрес в `ENTERPRISE_TEST_DATABASE_URL` и выполните `python -m pytest -q tests/test_workflows.py`. Тесты записывают данные и требуют свежую мигрированную базу при каждом повторе. GitHub Actions выполняет оба набора и smoke-тест всего Compose-стека.
 
 Из корня репозитория в PowerShell:
 
